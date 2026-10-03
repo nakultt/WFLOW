@@ -1,73 +1,98 @@
-# React + TypeScript + Vite
+# WFLOW
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**One natural-language command center for your work tools. Type or speak a request and an AI agent plans the steps and runs them across GitHub, Jira, Linear, Slack, Notion, Bugasura, Gmail and Google Workspace.**
 
-Currently, two official plugins are available:
+For example: *"Create a Jira ticket for the login bug, post it in #eng on Slack and block 30 minutes tomorrow to fix it."* WFLOW's task planner splits the request into ordered sub-tasks, and a LangChain tool-calling agent on Gemini 2.5 carries each one out with the right integration. It reports per-task status and keeps the conversation for follow-ups.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Chat and voice:** type, or dictate through the browser Speech Recognition API
+- **Multi-step task planning:** an LLM extracts individual tasks from one message and tracks each as `pending`, `in_progress`, `completed` or `failed`
+- **About 15 tool integrations:** GitHub, Jira, Linear, Slack, Notion, Bugasura, Gmail, Google Calendar, Docs, Sheets, Slides, Drive, Forms and Meet
+- **Predefined workflows:** Daily Standup Prep, Weekly Planning, Code Review Assistant, and a custom configuration
+- **Dashboard and settings:** connect integrations with OAuth (Google, Linear) or API tokens, and bring your own Gemini key
+- **Security:** bcrypt passwords, JWT sessions, and Fernet-encrypted integration tokens
 
-## Expanding the ESLint configuration
+## Architecture
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+```mermaid
+flowchart TD
+    subgraph FE["React + TypeScript + Vite + Tailwind (Vercel)"]
+        LG[Login / Signup]
+        DB[Dashboard]
+        CB[Chatbot + voice-recorder<br/>Web Speech API]
+        WF[Workflows<br/>predefined runs]
+        ST[Settings<br/>integration cards · API keys]
+    end
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+    FE -->|JWT · lib/api.ts| API
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+    subgraph API["FastAPI (backend/main.py)"]
+        AU[/auth + Google/Linear OAuth/]
+        CH[/api/chat/]
+        CV[/api/conversations/]
+        SE[/api/settings/]
+    end
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+    CH --> TP[services/task_planner.py<br/>message → ordered tasks]
+    TP --> AG[services/agent.py<br/>LangChain tool-calling agent<br/>Gemini 2.5 Flash / Pro]
+    AG --> TOOLS
+
+    subgraph TOOLS["services/* — tool wrappers"]
+        DEV[github · jira · linear · bugasura]
+        COM[slack · gmail · notion]
+        GWS[calendar · google_docs · sheets ·<br/>slides · drive · forms · meet]
+    end
+
+    AU & CV & SE & CH --> SQL[(SQLAlchemy<br/>SQLite / PostgreSQL<br/>users · integrations · conversations · messages)]
+    TOOLS --> EXT[(Third-party APIs)]
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Getting started
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Backend
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cat > .env <<EOF2
+DATABASE_URL=sqlite:///./conflux.db
+GOOGLE_API_KEY=your-gemini-key
+SECRET_KEY=change-me
+ENCRYPTION_KEY=<fernet key>
+EOF2
+python migrate_db.py               # create / migrate tables
+uvicorn main:app --reload          # http://localhost:8000/docs
 ```
+
+### Frontend
+
+```bash
+npm install
+npm run dev                        # http://localhost:5173
+```
+
+Set the API base URL in `src/lib/api.ts` if the backend isn't on the default host.
+
+## Project structure
+
+```
+WFLOW/
+├── src/
+│   ├── pages/        # chatbot, dashboard, workflows, settings, signup
+│   ├── ui/           # layout, sidebar, chat box, voice recorder, integration cards
+│   ├── context/      # AuthContext
+│   └── lib/api.ts    # API client
+└── backend/
+    ├── main.py       # FastAPI app
+    ├── app/routers/  # auth, OAuth, chat, conversations, settings
+    ├── app/services/ # agent, task planner, tool integrations
+    └── Procfile      # deploy entry
+```
+
+## Tech stack
+
+FastAPI · SQLAlchemy · LangChain · LangGraph · Google Gemini 2.5 · passlib/bcrypt · python-jose · cryptography · React · TypeScript · Vite · Tailwind CSS · Web Speech API · Vercel
